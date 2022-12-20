@@ -1,0 +1,1747 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "tst_val = 2**16\n",
+    "tst_val"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": true,
+    "jupyter": {
+     "outputs_hidden": true,
+     "source_hidden": true
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "\n",
+    "import json\n",
+    "\n",
+    "INPUT_FOLDER = \"../TsetlinMachine/HnM\"\n",
+    "\n",
+    "def string_to_list(string):\n",
+    "    # Stripping single quotation does not work on the end instance for whatever reason, but replace does. Look into this some other time maybe?\n",
+    "    cleaned_string = string.strip(\"[]\").replace(\"'\",\"\").replace(\"\\n\", \"\")\n",
+    "    return cleaned_string.split(\", \")\n",
+    "\n",
+    "def string_to_list_of_floats(string):\n",
+    "    # Stripping single quotation does not work on the end instance for whatever reason, but replace does. Look into this some other time maybe?\n",
+    "    cleaned_string = string.strip(\"[]\").replace(\"'\",\"\").replace(\"\\n\", \"\")\n",
+    "    return np.fromstring(cleaned_string, dtype=np.float16, sep=\", \")\n",
+    "\n",
+    "#FILE_NAME = \"transactions_train_sample01_HnM_Xy_30days_category_prediction.csv\"\n",
+    "FILE_NAME = \"transactions_train_HnM_Xy_30days_category_prediction.csv\"\n",
+    "\n",
+    "#transactions_df_30 = pd.read_csv('HnM/Narrowed_HnM/transactions_train_narrowed_Xy_30days_5(custom)items.csv', index_col=0, converters={\"article_id_x\":string_to_list, \"article_id_y\":string_to_list, \"days_since_transaction_x\":string_to_list_of_floats, \"days_since_transaction_y\":string_to_list_of_floats})\n",
+    "#transactions_df_30 = pd.read_csv('HnM/Narrowed_HnM/transactions_train_narrowed_Xy_30.csv', index_col=0, converters={\"article_id_x\":string_to_list, \"article_id_y\":string_to_list, \"days_since_transaction_x\":string_to_list_of_floats, \"days_since_transaction_y\":string_to_list_of_floats})\n",
+    "transactions_df_30 = pd.read_csv(f'{INPUT_FOLDER}/Narrowed_HnM/{FILE_NAME}', index_col=0, converters={\"article_id_x\":string_to_list, \"article_id_y\":string_to_list, \"timestamp_y\":string_to_list_of_floats, \"timestamp_x\":string_to_list_of_floats, \"y_product_type_name\": string_to_list, \"y_product_group_name\": string_to_list, \"y_colour_group_name\": string_to_list, \"y_department_name\": string_to_list})\n",
+    "transactions_df_30.head(50)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "factor_names = [f\"factor_{i}\" for i in range(5)]\n",
+    "[\"Customer_id\"] + factor_names"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "uf_df = pd.read_csv(f\"{INPUT_FOLDER}/Matrix_Factors/HnM_User_Factor_Matrix.csv\", dtype={0:object}, header=0, names=[\"customer_id\"] + factor_names)\n",
+    "if_df = pd.read_csv(f\"{INPUT_FOLDER}/Matrix_Factors/HnM_Item_Factor_Matrix.csv\", dtype={0:object}, header=0, names=[\"article_id\"] + factor_names)\n",
+    "customers_df = pd.read_csv(f'{INPUT_FOLDER}/customers.csv')#, index_col=0)\n",
+    "articles_df = pd.read_csv(f'{INPUT_FOLDER}/articles.csv', dtype={\"article_id\": \"str\"})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": true,
+    "jupyter": {
+     "outputs_hidden": true
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "articles_dict = {row[0]:np.asarray(row[1:], dtype=np.float32) for row in if_df.values}\n",
+    "customers_dict = {row[0]:np.asarray(row[1:], dtype=np.float32) for row in uf_df.values}\n",
+    "customers_dict"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "from sklearn.preprocessing import OneHotEncoder, LabelEncoder, normalize\n",
+    "\n",
+    "#article_indexes = articles_df[\"article_id\"].to_numpy().astype(str)\n",
+    "articles_used_cat_slice = articles_df.reset_index()[[\"article_id\", \"product_type_no\", \"product_group_name\", \"index_group_name\", \"graphical_appearance_name\", \"colour_group_code\"]]\n",
+    "#articles_used_cat_slice = articles_df.reset_index()[[\"article_id\", \"product_type_no\", \"product_group_name\", \"graphical_appearance_name\", \"colour_group_code\", \"perceived_colour_value_id\", \"perceived_colour_master_id\", \"department_no\", \"index_name\", \"index_group_name\", \"section_no\", \"garment_group_no\"]]\n",
+    "\n",
+    "# Encode each string column via LabelEncoder, stored in dict\n",
+    "article_encoder_dict = {}\n",
+    "for column in articles_used_cat_slice:\n",
+    "    if column == \"article_id\" or (articles_used_cat_slice[column].dtype == np.int64 and articles_used_cat_slice[column].mean() > 10e3):\n",
+    "        continue\n",
+    "    article_encoder_dict[column] = LabelEncoder()\n",
+    "    articles_used_cat_slice[column] = article_encoder_dict[column].fit_transform(articles_used_cat_slice[column])\n",
+    "\n",
+    "articles_label_encoded = articles_used_cat_slice.to_numpy()\n",
+    "article_cats_dict = {article_id:np.hstack((np.asarray(literals, np.float32), articles_dict[article_id])) for article_id, *literals in articles_label_encoded}\n",
+    "#article_cats_dict = {article_id:articles_dict[article_id] for article_id, *literals in articles_label_normed}\n",
+    "article_cats_dict[\"Column_names\"] = np.concatenate((articles_used_cat_slice.columns[1:].to_numpy(), if_df.columns[1:].to_numpy()))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "arbitrary_binary = article_cats_dict[next(iter(article_cats_dict.keys()))]\n",
+    "print(arbitrary_binary, arbitrary_binary.shape)\n",
+    "article_cats_dict[\"Column_names\"], article_cats_dict[\"Column_names\"].shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "#customer_ids = customers_df[\"customer_id\"].to_numpy()\n",
+    "# Does this binarizer consider the values of the age column? Investigate.\n",
+    "used_customer_cats = customers_df.reset_index()[[\"customer_id\", \"FN\", \"Active\", \"club_member_status\", \"age\", \"fashion_news_frequency\"]]\n",
+    "customer_encoder_dict = {}\n",
+    "for column in used_customer_cats:\n",
+    "    if used_customer_cats[column].dtype == np.int64 or column == \"customer_id\":\n",
+    "        continue\n",
+    "    customer_encoder_dict[column] = LabelEncoder()\n",
+    "    used_customer_cats[column] = customer_encoder_dict[column].fit_transform(used_customer_cats[column])\n",
+    "customers_label_encoded = used_customer_cats.to_numpy()\n",
+    "customer_binary_dict = {customer_id : np.concatenate((literals, customers_dict[customer_id])) for customer_id, *literals in customers_label_encoded}#zip(customer_ids, customers_encoded)}\n",
+    "#customer_binary_dict = {customer_id : customers_dict[customer_id] for customer_id, *literals in customers_label_normed}#zip(customer_ids, customers_encoded)}\n",
+    "customer_binary_dict[\"Column_names\"] = np.concatenate((used_customer_cats.columns[1:].to_numpy(), uf_df.columns[1:].to_numpy()))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "arb_key = next(iter(customer_binary_dict.keys()))\n",
+    "customer_binary_dict[arb_key]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# Convert list of transaction ids to category values, if list is shorter than x_length, pad with padding values.\n",
+    "def x_vals_to_binary(customer_id, transactions, days_since_trans, padding, x_length=10):\n",
+    "    x_binary = customer_binary_dict[customer_id]\n",
+    "    transactions = transactions[-1 * x_length:]\n",
+    "    for trans, days in zip(transactions, days_since_trans):\n",
+    "        x_binary = np.concatenate((x_binary, article_cats_dict[trans], np.array(days).reshape((1)) / 30))\n",
+    "    for _ in range(x_length - len(transactions)):\n",
+    "        x_binary = np.concatenate((x_binary, padding))\n",
+    "    return x_binary"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def get_device_memory_tuple(device_id):\n",
+    "    return (0.0, 0.0, 0.0)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def average_prescision_at_k(actual, predicted, k=10):\n",
+    "    if len(actual) == 0:\n",
+    "        return 0.0\n",
+    "\n",
+    "    score = 0.0\n",
+    "    num_hits = 0.0\n",
+    "\n",
+    "    for i,p in enumerate(predicted):\n",
+    "        if p in actual and p not in predicted[:i]:\n",
+    "            num_hits += 1.0\n",
+    "            score += num_hits / (i+1.0)\n",
+    "\n",
+    "    return score / min(len(actual), k)\n",
+    "\n",
+    "def naive_index_sorting(to_sort):\n",
+    "    indexed_list = [(val, index) for index, val in enumerate(to_sort)]\n",
+    "    indexed_list.sort(key=lambda x: x[0], reverse=True)\n",
+    "    return np.array(indexed_list)\n",
+    "\n",
+    "def top_k_at_n(naive_sorting_method, y_vals, k=10):\n",
+    "    #sort x_vals according to highest rated index for each column\n",
+    "    #naive_sorting_method = np.array([naive_index_sorting(x_pred_set) for x_pred_set in x_vals])\n",
+    "\n",
+    "    #Just reshape y_vals to ensure a list\n",
+    "    y_vals = y_vals.reshape((y_vals.shape[0], 1))\n",
+    "    apk_scores = np.array([average_prescision_at_k(item_y_vals, item_x_vals[:k], k) for item_y_vals, item_x_vals in zip(y_vals, naive_sorting_method)])\n",
+    "\n",
+    "    return apk_scores.mean(), apk_scores\n",
+    "\n",
+    "def calculate_accuracy(naive_sorting_method, y_vals):\n",
+    "    #naive_sorting_method = np.array([naive_index_sorting(x_pred_set) for x_pred_set in x_pred])\n",
+    "    top_predictions = naive_sorting_method[:,0,1]\n",
+    "    results = (top_predictions == y_vals)\n",
+    "    return results.mean(), results"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "from sklearn.model_selection import train_test_split\n",
+    "#from sklearn.linear_model import LogisticRegression\n",
+    "#from sklearn.tree import DecisionTreeClassifier\n",
+    "from sklearn.ensemble import GradientBoostingClassifier\n",
+    "from sklearn.model_selection import cross_val_score\n",
+    "import time\n",
+    "\n",
+    "exploded_ys_df = transactions_df_30[\"article_id_y\"].explode()\n",
+    "y_value_counts = exploded_ys_df.value_counts()\n",
+    "\n",
+    "BATCH_SIZE = 64\n",
+    "EPOCHS = 40\n",
+    "TRANSACTION_HISTORY_LENGTH = 10\n",
+    "LEARNING_RATE = 1e-2\n",
+    "#Y_SUBSET_SIZE = [8, 64, 512, 2048, -1]\n",
+    "Y_SUBSET_SIZE = [400]\n",
+    "#Y_SUBSET_SIZE = [4]\n",
+    "\n",
+    "output_size_statistics = {}\n",
+    "for portion in Y_SUBSET_SIZE:\n",
+    "    subset_time_start = time.time()\n",
+    "    output_size_statistics[portion] = get_device_memory_tuple(0)\n",
+    "\n",
+    "    trans_df = transactions_df_30.copy()\n",
+    "    used_y_values = y_value_counts[:portion].index\n",
+    "    print(used_y_values.size)\n",
+    "    indexed_Y_vals_dict = {article_id:i for i, article_id in enumerate(used_y_values)}\n",
+    "\n",
+    "    # Restrict K_NUM from being larger than possible y values.\n",
+    "    K_NUM = 12\n",
+    "    K_NUM = K_NUM if K_NUM < len(used_y_values) else len(used_y_values)\n",
+    "\n",
+    "    #Filter lists columns based on whether in top_items. Ensures that the age index matches the filtered item index\n",
+    "    trans_df[\"keep_indexes\"] = trans_df[\"article_id_y\"].apply(lambda x : [art_id in used_y_values for art_id in x])\n",
+    "    trans_df[\"article_id_y\"] = trans_df.apply(lambda x: np.array(x[\"article_id_y\"])[x[\"keep_indexes\"]], axis=1)\n",
+    "    trans_df[\"timestamp_y\"] = trans_df.apply(lambda x: np.array(x[\"timestamp_y\"])[x[\"keep_indexes\"]], axis=1)\n",
+    "    trans_df = trans_df.drop(columns=[\"keep_indexes\"], axis=0)\n",
+    "    trans_df = trans_df[trans_df[\"article_id_y\"].map(len) > 0]\n",
+    "    print(transactions_df_30.shape, trans_df.shape)\n",
+    "\n",
+    "    arbitrary_X_shape = next(iter(article_cats_dict.values())).shape\n",
+    "    # Padding value is 1 larger than X shape due to days field\n",
+    "    padding_value = np.zeros(shape=arbitrary_X_shape[0] + 1)\n",
+    "    padding_value.fill(0)\n",
+    "    trans_df[\"x_binary\"] = trans_df.apply(lambda row: x_vals_to_binary(row[\"customer_id\"], row[\"article_id_x\"], row[\"timestamp_x\"], padding_value, TRANSACTION_HISTORY_LENGTH), axis=1)\n",
+    "    trans_df[\"y_reduced\"] = trans_df.apply(lambda row: [indexed_Y_vals_dict[y_val_i] for y_val_i in set(row[\"article_id_y\"])], axis=1)\n",
+    "\n",
+    "     # Write out the x value column names, starting with customer cats and appending article history number to article cat names.\n",
+    "    #x_binary_column_names = np.concatenate((customer_binary_dict[\"Column_names\"], np.array([[f\"article_{i}_{column}\" for column in article_cats_dict[\"Column_names\"]] + [f\"article_{i}_days_since_transaction\"] for i in range(TRANSACTION_HISTORY_LENGTH)]).flatten()))\n",
+    "\n",
+    "    print(output_size_statistics)\n",
+    "    x_binary_column_names = [f\"a{i}\" for i in range(TRANSACTION_HISTORY_LENGTH)]\n",
+    "    x_binary_column_names = [f\"{cat_name_c if 'factor' not in cat_name_c else 'customer_' + cat_name_c}\" for cat_name_c in customer_binary_dict['Column_names']] + [f\"{art_name}_{cat_name}\" for art_name in x_binary_column_names for cat_name in list(article_cats_dict['Column_names']) + [\"timestamp\"]]\n",
+    "\n",
+    "    train_trans, test_trans = train_test_split(trans_df, test_size=0.2)\n",
+    "    train_trans = train_trans.explode(\"y_reduced\")\n",
+    "    test_trans = test_trans.explode(\"y_reduced\")\n",
+    "    x_train, y_train = np.vstack(train_trans[\"x_binary\"].values), train_trans[\"y_reduced\"].to_numpy(dtype=np.int16)\n",
+    "    x_test, y_test = np.vstack(test_trans[\"x_binary\"].values), test_trans[\"y_reduced\"].to_numpy(dtype=np.int16)\n",
+    "    start_time = time.time()\n",
+    "    output_size_statistics[portion] = []\n",
+    "    start_training = time.time()\n",
+    "\n",
+    "    gbdt_sol = GradientBoostingClassifier(learning_rate=LEARNING_RATE, n_estimators=100)\n",
+    "    gbdt_sol.fit(x_train, y_train)\n",
+    "    stop_training = time.time()\n",
+    "\n",
+    "\n",
+    "\n",
+    "    start_testing = time.time()\n",
+    "    pred = gbdt_sol.predict_proba(x_test)\n",
+    "    stop_testing = time.time()\n",
+    "\n",
+    "    naive_sorting_method = np.array([naive_index_sorting(x_pred_set) for x_pred_set in pred])\n",
+    "    result_accuracy, result_accuracy_array = calculate_accuracy(naive_sorting_method, y_test)\n",
+    "    result_top_k, result_top_k_array = top_k_at_n(naive_sorting_method, y_test, k=12)\n",
+    "\n",
+    "\n",
+    "    epoch_stats = result_top_k, result_accuracy, 0.0, result_top_k, time.time() - start_time, stop_training - start_training, stop_testing - start_testing\n",
+    "    print(epoch_stats)\n",
+    "    epoch_stats = epoch_stats + ((time.time() - start_time),)\n",
+    "    output_size_statistics[portion].append(epoch_stats)\n",
+    "    #epoch_stats = (i, float(result_accuracy), 0.0, float(result_top_k), time() - loop_start_time, stop_training - start_training, stop_testing - start_testing)\n",
+    "    output_size_statistics[portion].append((\"End: \", time.time() - subset_time_start, int(trans_df.size), int(used_y_values.size), get_device_memory_tuple(0)))\n",
+    "\n",
+    "    print(f\"Result accuracy: {result_accuracy}, Result topk:{result_top_k}\")\n",
+    "    print(output_size_statistics)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "is_executing": true,
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [
+    {
+     "ename": "NameError",
+     "evalue": "name 'epoch_stats' is not defined",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+      "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+      "\u001b[0;32m/tmp/ipykernel_1956/1366810714.py\u001b[0m in \u001b[0;36m<module>\u001b[0;34m\u001b[0m\n\u001b[0;32m----> 1\u001b[0;31m \u001b[0mepoch_stats\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m",
+      "\u001b[0;31mNameError\u001b[0m: name 'epoch_stats' is not defined"
+     ]
+    }
+   ],
+   "source": [
+    "epoch_stats"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "calculate_accuracy(naive_sorting_method, y_test)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "top_k_at_n(naive_sorting_method, y_test, k=12)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "top_k_at_n(naive_sorting_method, y_test, k=100)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "gbdt_sol.coef_.mean(axis=0).shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "with pd.option_context('display.max_rows', None, 'display.max_columns', None):\n",
+    "    display(pd.DataFrame(gbdt_sol.coef_, columns=x_binary_column_names))\n",
+    "    #display(pd.DataFrame(gbdt_sol.coef_.mean(axis=0).reshape(1, -1), columns=x_binary_column_names))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "top_k_at_n(naive_sorting_method, y_test, k=1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "model_params = []\n",
+    "for param in model.parameters():\n",
+    "    print(param.data.shape)\n",
+    "    model_params.append(param.data)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "weights = model_params[0].transpose(0, 1)\n",
+    "for i in range(len(weights)):\n",
+    "    print(weights[i].sum().item())\n",
+    "\n",
+    "layer_2_weights = np.array([weights[i].sum() / 120 for i in range(len(weights))])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "pd.DataFrame(layer_2_weights.reshape(1, -1), columns=x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "layer_2_weights.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "x_binary_column_names"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "train_trans.shape, test_trans.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "with torch.no_grad():\n",
+    "    test_loss, apk, accuracy = 0, 0, 0\n",
+    "    print(len(test_dataloader))\n",
+    "    test_num_batches = len(test_dataloader)\n",
+    "    for i, (X_test, y_test) in enumerate(test_dataloader):\n",
+    "        pred = model(X_test)\n",
+    "        test_loss += loss_fn(pred, y_test).item()\n",
+    "        apk += calculate_mean_apk(y_test, pred, 12)\n",
+    "\n",
+    "        if i == test_num_batches:\n",
+    "            break\n",
+    "test_loss /= test_num_batches\n",
+    "apk /= test_num_batches\n",
+    "test_loss, apk"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "x_test, y_test = next(iter(test_dataloader))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "with torch.no_grad():\n",
+    "    test_pred = model(x_test)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def test_calculate_mean_apk(actual, predicted, k):\n",
+    "    k_predictions = [pred_tensor.topk(k)[1] for pred_tensor in predicted]\n",
+    "    actuals = [y_tensor.nonzero() for y_tensor in actual]\n",
+    "    print(actuals, len(actuals))\n",
+    "    results = [average_prescision_at_k(n_act, n_pred, k) for n_act, n_pred in zip(actuals, k_predictions)]\n",
+    "    return sum(results) / len(results)\n",
+    "\n",
+    "test_calculate_mean_apk(y_test, test_pred, 12)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def model_predict(model, data, class_number):\n",
+    "    with torch.no_grad():\n",
+    "        input_data = torch.Tensor(data)\n",
+    "        return model.forward(input_data)[:,class_number]\n",
+    "\n",
+    "train_data_np = np.stack(train_trans[\"x_binary\"].to_numpy())\n",
+    "test_data_np = np.stack(test_trans[\"x_binary\"].to_numpy())\n",
+    "explainer = shap.Explainer(lambda x: model_predict(model, x, 169), train_data_np, feature_names=x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap_values = explainer(test_data_np[:200])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.plots.beeswarm(shap_values, color_bar=True, max_display=20)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.plots.bar(shap_values.abs.mean(0), max_display=20)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.plots.beeswarm(shap_values)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "\n",
+    "OUTPUT_DIR = \"Stats\"\n",
+    "if not os.path.exists(OUTPUT_DIR):\n",
+    "    os.mkdir(OUTPUT_DIR)\n",
+    "#json_stats = json.dumps(output_size_statistics)\n",
+    "with open(f\"{OUTPUT_DIR}/NN_stats_{EPOCHS}_epochs_{'-'.join([str(y_sub) for y_sub in Y_SUBSET_SIZE])}.json\", \"w\") as outfile:\n",
+    "    json.dump(output_size_statistics, outfile)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import sys\n",
+    "np.set_printoptions(threshold=np.inf)\n",
+    "import torchmetrics\n",
+    "\n",
+    "test_input_tensor, test_output_tensor = next(iter(test_dataloader))\n",
+    "pred_test = model(test_input_tensor)\n",
+    "print(test_input_tensor.shape, test_output_tensor.shape, pred_test.shape)\n",
+    "confusion_matrix = torchmetrics.ConfusionMatrix(num_classes=pred_test.shape[1], normalize='true')#test_input_tensor.shape[1])\n",
+    "conf_matrix = confusion_matrix(pred_test.argmax(dim=1), test_output_tensor.argmax(dim=1))\n",
+    "conf_matrix.numpy()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "all_predictions, all_y_values = torch.empty(0), torch.empty(0)\n",
+    "for i, (X, y) in enumerate(test_dataloader):\n",
+    "    # if i > 10:\n",
+    "    #     break\n",
+    "    test_pred = model(X)\n",
+    "    all_predictions = torch.cat((all_predictions, test_pred))\n",
+    "    all_y_values = torch.cat((all_y_values, y))\n",
+    "    #print(test_pred)\n",
+    "    #print(all_predictions)\n",
+    "    #print(test_pred.argmax(dim=1).unique(return_counts=True)[0])\n",
+    "prediction_counts = all_predictions.argmax(dim=1).unique(return_counts=True)[1]\n",
+    "print(prediction_counts.max() / prediction_counts.sum())\n",
+    "prediction_counts"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "all_class_cm = confusion_matrix(all_predictions.argmax(dim=1), all_y_values.argmax(dim=1))\n",
+    "all_class_cm.numpy()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "np.delete(all_class_cm[i].numpy(), [i]).sum()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# Produce a list of true positives and false positives for each class.\n",
+    "class_positives = np.vstack([(all_class_cm[i][i].item(), np.delete(all_class_cm[i].numpy(), [i]).sum()) for i in range(400)])\n",
+    "print(class_positives[:,0].argsort()[::-1][:10])\n",
+    "class_positives[class_positives[:,0].argsort()[::-1]]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import shap\n",
+    "shap.initjs()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "train_data_numpy = np.stack(train_trans[\"x_binary\"].values)\n",
+    "test_data_numpy = np.stack(test_trans[\"x_binary\"].values)\n",
+    "test_data_numpy_y = test_trans[\"y_reduced\"].to_numpy()\n",
+    "train_data_numpy.shape, test_data_numpy.shape, test_data_numpy_y.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap_data = shap.sample(train_data_numpy, 1000)\n",
+    "def model_predict(x_vals, nn_model):\n",
+    "    return nn_model.forward_numpy(x_vals)\n",
+    "\n",
+    "explainer = shap.KernelExplainer(lambda x: model_predict(x, model), shap_data)\n",
+    "shap_values_single = explainer.shap_values(train_data_numpy[299], nsamples=500)\n",
+    "#shap.force_plot(explainer.expected_value, shap_values, train_data_numpy[299])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.force_plot(explainer.expected_value[80], shap_values_single[80], train_data_numpy[18335], feature_names=x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "model_predict(test_data_numpy[12], model).reshape(1, -1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def model_predict_reshape(x_vals, nn_model):\n",
+    "    prediction = nn_model.forward_numpy(x_vals)\n",
+    "    print(prediction.shape)\n",
+    "    if prediction.shape == (400, ):\n",
+    "        prediction = prediction.reshape(1, -1)\n",
+    "    return prediction"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "model_predict_reshape(test_data_numpy[:12], model)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "test_data_numpy[12]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "test_explaination = shap.Explainer(lambda x: model_predict_reshape(x, model), train_data_numpy)\n",
+    "shap_values_test = test_explaination(test_data_numpy[12])#[:25])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.plots.beeswarm(shap_values_test[0])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.force_plot(explainer.expected_value[0], shap_values_single[0], train_data_numpy[299], feature_names=x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.summary_plot(shap_values_single,  train_data_numpy[299])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap_values = explainer.shap_values(train_data_numpy[280:300], nsamples=500)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap_values50 = shap_values\n",
+    "shap.force_plot(explainer.expected_value[0], shap_values50[0], test_data_numpy[280:330], feature_names=x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "train_data_numpy = np.stack(train_trans[\"x_binary\"].values)\n",
+    "test_data_numpy = np.stack(test_trans[\"x_binary\"].values)\n",
+    "test_data_numpy_y = test_trans[\"y_reduced\"].to_numpy()\n",
+    "train_data_numpy.shape, test_data_numpy.shape, test_data_numpy_y.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def find_correct_predictions(test_data_x, test_data_y, max_iterations = -1, y_value = -1):\n",
+    "    predicted_cats = np.empty(0)\n",
+    "    #correct_predictions_at_1 = np.empty(3)#np.array((0,0,0))\n",
+    "    correct_predictions_at_1 = []#np.array((0,0,0))\n",
+    "    for i, (row_X, row_y) in enumerate(list(zip(test_data_x, test_data_y))[:max_iterations]):\n",
+    "        # If searching for specific y value, skip rows without value, and limit y_values to just that particular y value if present.\n",
+    "        if y_value != -1 and y_value not in row_y:\n",
+    "            continue\n",
+    "        elif y_value != -1:\n",
+    "            row_y = [y_value]\n",
+    "\n",
+    "        row_pred = model.forward_numpy(row_X)\n",
+    "        predicted_row_cat = row_pred.argmax()\n",
+    "        predicted_cats = np.append(predicted_cats, predicted_row_cat)\n",
+    "        if predicted_row_cat in row_y:\n",
+    "            correct_predictions_at_1.append((i, predicted_row_cat, row_pred[predicted_row_cat]))# = np.vstack([correct_predictions_at_1, np.array((i, predicted_row_cat, row_pred[predicted_row_cat]))])\n",
+    "        #print(i, predicted_row_cat)\n",
+    "    #print(np.unique(predicted_cats, return_counts=True))\n",
+    "    return correct_predictions_at_1\n",
+    "with torch.no_grad():\n",
+    "    correct_predictions = find_correct_predictions(test_data_numpy, test_data_numpy_y, max_iterations=-1)\n",
+    "\n",
+    "correct_predictions"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "with torch.no_grad():\n",
+    "    true_pred = model.forward_numpy(test_data_numpy[22172])\n",
+    "print(true_pred[true_pred.argsort()[::-1]][:350].sum())\n",
+    "cumulative_true_pred = np.array([true_pred[true_pred.argsort()[::-1]][:i].sum() for i in range(1, true_pred.size + 1)])\n",
+    "np.vstack((true_pred.argsort()[::-1], true_pred[true_pred.argsort()[::-1]], cumulative_true_pred))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def get_cumulative_pred_for_index(index):\n",
+    "    with torch.no_grad():\n",
+    "        true_pred = model.forward_numpy(test_data_numpy[index])\n",
+    "    cumulative_true_pred = np.array([true_pred[true_pred.argsort()[::-1]][:i].sum() for i in range(1, true_pred.size + 1)])\n",
+    "    return np.vstack((true_pred.argsort()[::-1], true_pred[true_pred.argsort()[::-1]], cumulative_true_pred))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "test_indexes = [22171, 10, 17037, 22170]\n",
+    "label_veracity = [True, False, True, False]\n",
+    "\n",
+    "for test_index, veracity in zip(test_indexes, label_veracity):\n",
+    "    example_item_pred = get_cumulative_pred_for_index(test_index)\n",
+    "    plt.plot(np.arange(true_pred.size), example_item_pred[2], label=f\"{test_index} ({veracity})\")\n",
+    "plt.legend()\n",
+    "\n",
+    "#plt.plot(np.arange(true_pred.size), example_item_pred_2[2])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "explainer = shap.KernelExplainer(lambda x: model_predict(x, model), shap_data)\n",
+    "shap_values_single = explainer.shap_values(train_data_numpy[22172], nsamples=500)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.force_plot(explainer.expected_value[80], shap_values_single[80], train_data_numpy[22172], feature_names=x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.plots.waterfall(shap_values_single)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   },
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "np.array(x_binary_column_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "tmp_X = next(iter(train_dataloader))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap_explainer = shap.Explainer(model_predict, train_data_numpy)\n",
+    "shap_values = explainer.shap_values(train_data_numpy[18335], nsamples=500)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "shap.force_plot(explainer.expected_value[80], shap_values[80], train_data_numpy[18335], feature_names=x_binary_column_names)#, X_display.iloc[299,:])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "train_data_numpy[256]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "column_names = train_dataset.get_column_names()\n",
+    "column_name_map = {i:name for i, name in enumerate(column_names)}\n",
+    "cat_indexes = np.arange(len(column_names))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import lime\n",
+    "\n",
+    "from lime import lime_tabular\n",
+    "\n",
+    "correct_pred_index = correct_predictions[10][0].astype(int)\n",
+    "print(correct_pred_index)\n",
+    "\n",
+    "# def adjust_tensor_sum(prediction_scores, prediction_tensors):\n",
+    "#     for prediction, prediction_t in zip(prediction_scores, prediction_tensors):\n",
+    "#         print(prediction.sum(), prediction.shape, prediction_t.sum(), prediction_t.shape)\n",
+    "#     return prediction_scores\n",
+    "\n",
+    "lime_explainer = lime_tabular.LimeTabularExplainer(\n",
+    "    training_data=train_data_numpy,\n",
+    "    categorical_features=cat_indexes,\n",
+    "    #categorical_names=column_name_map,\n",
+    "    feature_names= train_dataset.get_column_names(),\n",
+    "    mode=\"classification\"\n",
+    ")\n",
+    "\n",
+    "test_batch_input, test_batch_output = next(iter(test_dataloader))\n",
+    "lime_explaination = lime_explainer.explain_instance(\n",
+    "    data_row=test_data_numpy[correct_pred_index],\n",
+    "    predict_fn=model.forward_numpy\n",
+    ")\n",
+    "lime_explaination.show_in_notebook()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "pred = model.forward_numpy(test_data_numpy[0])\n",
+    "pred.sum()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "with torch.no_grad():\n",
+    "    pred = model.forward(torch.FloatTensor(test_batch_input[0]))\n",
+    "pred.topk(100)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "in_tensor, out_tensor = next(iter(test_dataloader))\n",
+    "in_tensor[0]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "def average_prescision_at_k(actual, predicted, k=10):\n",
+    "    if len(actual) == 0:\n",
+    "        return 0.0\n",
+    "\n",
+    "    score = 0.0\n",
+    "    num_hits = 0.0\n",
+    "\n",
+    "    for i,p in enumerate(predicted):\n",
+    "        if p in actual and p not in predicted[:i]:\n",
+    "            num_hits += 1.0\n",
+    "            score += num_hits / (i+1.0)\n",
+    "\n",
+    "    print(actual, predicted, score)\n",
+    "    return score / min(len(actual), k)\n",
+    "\n",
+    "def calculate_mean_apk(actual, predicted):\n",
+    "    k_predictions = [pred_tensor.topk(10)[1] for pred_tensor in predicted]\n",
+    "    actuals = [y_tensor.nonzero() for y_tensor in actual]\n",
+    "    results = [average_prescision_at_k(n_act, n_pred, K_NUM) for n_act, n_pred in zip(actuals, k_predictions)]\n",
+    "    return sum(results) / len(results)\n",
+    "\n",
+    "with torch.no_grad():\n",
+    "    pred = model(in_tensor)\n",
+    "\n",
+    "calculate_mean_apk(out_tensor, pred)\n",
+    "# print(pred[0].topk(10))\n",
+    "# pred[0]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "with torch.no_grad():\n",
+    "    pred = model(in_tensor)\n",
+    "\n",
+    "# test_index = 2\n",
+    "# y_val = out_tensor[test_index].nonzero()\n",
+    "# print(y_val, pred[test_index][y_val])\n",
+    "# pred[test_index].topk(20)\n",
+    "for i in range(BATCH_SIZE):\n",
+    "    y_val = out_tensor[i].nonzero()\n",
+    "    print(y_val, pred[i][y_val], pred[i].topk(3))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    },
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "pred[0].topk(400)"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.12"
+  },
+  "vscode": {
+   "interpreter": {
+    "hash": "3781f7017ca0b9de91b3fa2496fb023ed6cbd54c6077891b434d73e407680117"
+   }
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
